@@ -48,7 +48,7 @@ trap compose_force_cleanup EXIT
 
 try_image_restore_from_docker_repository() {
   plugin_prompt buildkite-agent meta-data get "$(build_meta_data_image_tag_key "$COMPOSE_SERVICE_NAME")"
-  local tag="$(buildkite-agent meta-data get "$(build_meta_data_image_tag_key "$COMPOSE_SERVICE_NAME")" 2>/dev/null)"
+  local tag="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$(buildkite-agent meta-data get "$(build_meta_data_image_tag_key "$COMPOSE_SERVICE_NAME")" 2>/dev/null)"
 
   if [[ ! -z "$tag" ]]; then
     echo "~~~ :docker: Pulling docker image $tag"
