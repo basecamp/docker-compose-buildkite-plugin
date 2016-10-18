@@ -1,5 +1,7 @@
 #!/bin/bash
 
+DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
+
 COMPOSE_SERVICE_NAME="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_RUN"
 
 check_required_args() {
@@ -57,9 +59,7 @@ try_image_restore_from_docker_repository() {
 
     echo "~~~ :docker: Creating a modified Docker Compose config"
 
-    # TODO: Fix this el-dodgo method
-    local escaped_tag_for_sed=$(echo "$tag" | sed -e 's/[\/&]/\\&/g')
-    plugin_prompt_and_must_run sed -i.orig "s/build: \./image: $escaped_tag_for_sed/" "$(docker_compose_config_file)"
+    plugin_prompt_and_must_run ruby $DIR/modify_compose.rb "$(docker_compose_config_file)" "$BUILDKITE_DOCKER_COMPOSE_CONTAINER" "$tag"
   fi
 }
 
