@@ -3,6 +3,7 @@
 DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)"
 
 COMPOSE_SERVICE_NAME="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_RUN"
+COMPOSE_SERVICE_OVERRIDE_FILE="docker-compose.buildkite-$COMPOSE_SERVICE_NAME-override.yml"
 
 check_required_args() {
   if [[ -z "${BUILDKITE_COMMAND:-}" ]]; then
@@ -19,29 +20,17 @@ compose_force_cleanup() {
   # Send them a friendly kill
   run_docker_compose kill || true
 
-  local docker_compose_version=$(run_docker_compose --version)
-
-  if [[ "$docker_compose_version" == *1.4* || "$docker_compose_version" == *1.5* || "$docker_compose_version" == *1.6* ]]; then
-    # There's no --all flag to remove adhoc containers
-    if [[ "${BUILDKITE_PLUGIN_DOCKER_COMPOSE_LEAVE_VOLUMES:-false}" == "true" ]]; then
-      run_docker_compose rm --force -v || true
-    else
-      run_docker_compose rm --force || true
-    fi
-
-    # So now we remove the adhoc container
-    # This isn't cleaned up by compose, so we have to do it ourselves
-    local adhoc_run_container_name="${COMPOSE_SERVICE_NAME}_run_1"
-    plugin_prompt_and_run docker rm -f "$remove_volume_flag" "$(docker_compose_container_name "$adhoc_run_container_name")" || true
+  # `compose down` doesn't support force removing images, so we use `rm --force`
+  if [[ "${BUILDKITE_PLUGIN_DOCKER_COMPOSE_LEAVE_VOLUMES:-false}" == "false" ]]; then
+    run_docker_compose rm --force -v || true
   else
-    # `compose down` doesn't support force removing images, so we use `rm --force`
-    if [[ "${BUILDKITE_PLUGIN_DOCKER_COMPOSE_LEAVE_VOLUMES:-false}" == "true" ]]; then
-      run_docker_compose rm --force --all -v || true
-    else
-      run_docker_compose rm --force --all || true
-    fi
+    run_docker_compose rm --force || true
+  fi
 
-    # Stop and remove all the linked services and network
+  # Stop and remove all the linked services and network
+  if [[ "${BUILDKITE_PLUGIN_DOCKER_COMPOSE_LEAVE_VOLUMES:-false}" == "false" ]]; then
+    run_docker_compose down --volumes || true
+  else
     run_docker_compose down || true
   fi
 }
@@ -59,7 +48,7 @@ try_image_restore_from_docker_repository() {
 
     echo "~~~ :docker: Creating a modified Docker Compose config"
 
-    plugin_prompt_and_must_run ruby $DIR/modify_compose.rb "$(docker_compose_config_file)" "$BUILDKITE_DOCKER_COMPOSE_CONTAINER" "$tag"
+    plugin_prompt_and_must_run ruby $DIR/modify_compose.rb "$COMPOSE_SERVICE_OVERRIDE_FILE" "$COMPOSE_SERVICE_NAME" "$tag"
   fi
 }
 
@@ -69,6 +58,53 @@ echo "+++ :docker: Running command in Docker Compose service: $COMPOSE_SERVICE_N
 
 # $BUILDKITE_COMMAND needs to be unquoted because:
 #   docker-compose run "app" "go test"
-# does not work whereas the follow down:
+# does not work whereas the follow does:
 #   docker-compose run "app" go test
-run_docker_compose run "$COMPOSE_SERVICE_NAME" $BUILDKITE_COMMAND
+
+if [[ -f "$COMPOSE_SERVICE_OVERRIDE_FILE" ]]; then
+  run_docker_compose -f "$COMPOSE_SERVICE_OVERRIDE_FILE" run "$COMPOSE_SERVICE_NAME" $BUILDKITE_COMMAND
+else
+  run_docker_compose run "$COMPOSE_SERVICE_NAME" $BUILDKITE_COMMAND
+fi
+
+exitcode=$?
+
+if [[ $exitcode -ne 0 ]] ; then
+  echo "^^^ +++"
+  echo "+++ :warning: Failed to run command, exited with $exitcode"
+fi
+
+list_linked_containers() {
+  for container_id in $(HIDE_PROMPT=1 run_docker_compose ps -q); do
+    docker inspect --format='{{.Name}}' "$container_id"
+  done
+}
+
+check_linked_containers() {
+  local logdir="$1"
+  local cmdexit="$2"
+
+  mkdir -p "$logdir"
+
+  for container_name in $(list_linked_containers); do
+    container_exit_code=$(docker inspect --format='{{.State.ExitCode}}' "$container_name")
+
+    if [[ $container_exit_code -ne 0 ]] ; then
+      echo "+++ :warning: Linked container $container_name exited with $container_exit_code"
+    fi
+
+    # Capture logs if the linked container failed OR if the main command failed
+    if [[ $container_exit_code -ne 0 ]] || [[ $cmdexit -ne 0 ]] ; then
+      plugin_prompt_and_run docker logs --timestamps --tail 500 "$container_name"
+      docker logs -t "$container_name" > "${logdir}/${container_name}.log"
+    fi
+  done
+}
+
+echo "~~~ Checking linked containers"
+check_linked_containers "docker-compose-logs" "$exitcode"
+
+echo "~~~ Uploading container logs as artifacts"
+buildkite-agent artifact upload "docker-compose-logs/*.log"
+
+exit $exitcode

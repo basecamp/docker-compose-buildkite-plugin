@@ -1,18 +1,11 @@
 #!/bin/bash
 
-COMPOSE_SERVICE_NAME="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD"
-COMPOSE_SERVICE_DOCKER_IMAGE_NAME="$(docker_compose_container_name "$COMPOSE_SERVICE_NAME")"
-DOCKER_IMAGE_REPOSITORY="${BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:-}"
+# Config options
 
-# Returns a friendly image file name like "myproject-app-build-49" than can be
-# used as the docker image tag or tar.gz filename
-image_file_name() {
-  # The project slug env variable includes the org (e.g. "org/project"), so we
-  # have to strip the org from the front (e.g. "project")
-  local project_name=$(echo "$BUILDKITE_PROJECT_SLUG" | sed 's/^\([^\/]*\/\)//g')
+BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY="${BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:-}"
+BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_NAME="${BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_NAME:-${BUILDKITE_PIPELINE_SLUG}-${BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD}-build-${BUILDKITE_BUILD_NUMBER}}"
 
-  echo "$project_name-$COMPOSE_SERVICE_NAME-build-$BUILDKITE_BUILD_NUMBER"
-}
+# Local vars
 
 push_image_to_docker_repository() {
   # XXX: Consuming array configuration is pretty gnarly
@@ -34,22 +27,30 @@ push_image_to_docker_repository() {
     plugin_prompt_and_must_run docker tag "$COMPOSE_SERVICE_DOCKER_IMAGE_NAME" "$DOCKER_IMAGE_REPOSITORY:$tag"
     plugin_prompt_and_must_run docker push "$DOCKER_IMAGE_REPOSITORY:$tag"
     plugin_prompt_and_must_run docker rmi "$DOCKER_IMAGE_REPOSITORY:$tag"
+    plugin_prompt_and_must_run buildkite-agent meta-data set "$(build_meta_data_image_tag_key "$BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD")" "$TAG"
   done
-
-  plugin_prompt_and_must_run buildkite-agent meta-data set "$(build_meta_data_image_tag_key "$COMPOSE_SERVICE_NAME")" "$tag"
 }
 
-echo "+++ :docker: Building Docker Compose images for service $COMPOSE_SERVICE_NAME"
+COMPOSE_SERVICE_OVERRIDE_FILE="docker-compose.buildkite-$BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD-override.yml"
 
-run_docker_compose build "$COMPOSE_SERVICE_NAME"
+if [[ ! -z "$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY" ]]; then
+  TAG="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_NAME"
+else
+  TAG="$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_NAME"
+fi
 
-echo "~~~ :docker: Listing docker images"
+echo "~~~ :docker: Creating a modified Docker Compose config"
 
-plugin_prompt docker images
-docker images | grep buildkite
+plugin_prompt_and_must_run ruby $DIR/modify_compose.rb "$COMPOSE_SERVICE_OVERRIDE_FILE" "$COMPOSE_SERVICE_NAME" "$TAG"
 
-if [[ ! -z "$DOCKER_IMAGE_REPOSITORY" ]]; then
-  echo "~~~ :docker: Pushing image $COMPOSE_SERVICE_DOCKER_IMAGE_NAME to $DOCKER_IMAGE_REPOSITORY"
+cat $COMPOSE_SERVICE_OVERRIDE_FILE
+
+echo "+++ :docker: Building Docker Compose images for service $BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD"
+
+run_docker_compose -f "$COMPOSE_SERVICE_OVERRIDE_FILE" build "$BUILDKITE_PLUGIN_DOCKER_COMPOSE_BUILD"
+
+if [[ ! -z "$BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY" ]]; then
+  echo "~~~ :docker: Pushing image to $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY"
 
   push_image_to_docker_repository
 fi

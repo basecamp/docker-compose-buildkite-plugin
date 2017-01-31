@@ -75,8 +75,8 @@ steps:
     plugins:
       docker-compose:
         build: app
-        image-repository: org/repo
-    
+        image-repository: index.docker.io/org/repo
+
   - wait
 
   - name: ":docker: Test %n"
