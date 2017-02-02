@@ -29,14 +29,27 @@ filter_tag_name() {
   esac
 }
 
+docker_push_tags(){
+  echo "--- :docker: Push Custom Tags"
+  for tagvar in $(env|grep 'BUILDKITE_PLUGIN_DOCKER_COMPOSE_TAGS')
+  do
+      local tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
+      plugin_prompt_and_must_run docker tag "$CURRENT_IMAGE" $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
+  done
+}
+
+docker_image_cleanup(){
+  echo "--- :docker:  Cleaning up Images"
+  plugin_prompt_and_must_run docker rmi -f "$CURRENT_IMAGE"
+  for tagvar in $(env|grep 'BUILDKITE_PLUGIN_DOCKER_COMPOSE_TAGS'); do
+    local tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
+    plugin_prompt_and_must_run docker rmi -f $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
+  done
+}
+trap docker_image_cleanup EXIT
+
 try_image_restore_from_docker_repository "$CURRENT_IMAGE"
 
-echo "+++ :docker: Push Custom Tags"
-echo "+++ debug: $CURRENT_IMAGE"
+docker_push_tags
 
-for tagvar in $(env|grep 'BUILDKITE_PLUGIN_DOCKER_COMPOSE_TAGS')
-do
-    tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
-    echo "+++ :docker: Pushing $tag"
-    plugin_prompt_and_must_run docker tag "$CURRENT_IMAGE" $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
-done
+exit $?
