@@ -36,7 +36,7 @@ echo "+++ debug: $CURRENT_IMAGE"
 
 for tagvar in $(env|grep 'BUILDKITE_PLUGIN_DOCKER_COMPOSE_TAGS')
 do
-    local tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
+    tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
     echo "+++ :docker: Pushing $tag"
     plugin_prompt_and_must_run docker tag "$CURRENT_IMAGE" $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
 done
