@@ -35,6 +35,7 @@ docker_push_tags(){
   do
       local tag=$(filter_tag_name $(echo $tagvar | awk -F= '{print $2}'))
       plugin_prompt_and_must_run docker tag "$CURRENT_IMAGE" $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
+      plugin_prompt_and_must_run docker push $BUILDKITE_PLUGIN_DOCKER_COMPOSE_IMAGE_REPOSITORY:$tag
   done
 }
 
