@@ -29,7 +29,7 @@ filter_tag_name() {
   esac
 }
 
-try_image_restore_from_docker_repository "$current_image"
+try_image_restore_from_docker_repository "$CURRENT_IMAGE"
 
 echo "+++ :docker: Push Custom Tags"
 echo "+++ debug: $CURRENT_IMAGE"
